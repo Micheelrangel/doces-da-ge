@@ -718,7 +718,7 @@ function renderBackupStatus(){
  el.innerHTML = `<h2>Status do backup</h2>
  <p class="note">${linhaBackup}</p>
  <p class="note">Armazenamento persistente: ${persistTxt}</p>
- ;
+ <p class="note">Um backup automático roda sozinho ao abrir o app, no máximo 1x por semana. Nada é sobrescrito: cada backup (manual ou automático) baixa um <b>arquivo novo</b>, com a data no nome, para a pasta de downloads.</p>`;
 }
 function importarJSON(ev){
  const file = ev.target.files[0]; if(!file) return;
