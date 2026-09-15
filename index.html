@@ -261,6 +261,7 @@ th{background:var(--card2);color:var(--muted);font-size:11px;text-transform:uppe
 
 <!-- ==================== BACKUP ==================== -->
 <section id="backup" class="tab">
+<div class="card" id="backupStatusCard"></div>
 <div class="card">
 <h2>Backup completo (JSON)</h2>
 <p class="note">O JSON é o backup principal — preserva produtos, pedidos, despesas e caixinhas exatamente como estão no sistema.</p>
@@ -309,7 +310,8 @@ function defaultDB(){
    custoGiro:{saldoReal:0,atualizadoEm:null},
    lucro:{saldoReal:0,atualizadoEm:null},
    emergencia:{saldoReal:0,atualizadoEm:null}
-  }
+  },
+  meta:{ ultimoBackupEm:null, proximoLembreteEm:null, armazenamentoPersistente:null }
  };
 }
 var db;
@@ -317,6 +319,7 @@ try{ db=JSON.parse(localStorage.getItem(KEY)); }catch(e){ db=null; }
 if(!db || !db.produtos) db=defaultDB();
 if(!db.despesas) db.despesas=[];
 if(!db.caixinhas) db.caixinhas=defaultDB().caixinhas;
+if(!db.meta) db.meta=defaultDB().meta;
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID(): 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
 function save(){ localStorage.setItem(KEY, JSON.stringify(db)); }
@@ -324,6 +327,7 @@ const brl=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function fmtData(d){ return new Date(d+'T12:00').toLocaleDateString('pt-BR'); }
+function diasEntre(d1,d2){ return Math.round((new Date(d2+'T12:00')-new Date(d1+'T12:00'))/86400000); }
 
 /* ============ NAV ============ */
 document.querySelectorAll('.tabbtn').forEach(b=>b.onclick=()=>{
@@ -649,8 +653,72 @@ function baixarArquivo(nome, conteudo, tipo){
  a.href=url; a.download=nome; document.body.appendChild(a); a.click();
  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
-function exportarJSON(){
+function registrarBackupFeito(){
+ db.meta.ultimoBackupEm = todayStr();
+ const d = new Date(); d.setDate(d.getDate()+7);
+ db.meta.proximoLembreteEm = d.toISOString().slice(0,10);
+ save();
+ renderBackupStatus();
+}
+function exportarJSON(automatico){
  baixarArquivo(`backup-doces-da-ge-${todayStr()}.json`, JSON.stringify(db,null,2), 'application/json');
+ registrarBackupFeito();
+ if(automatico) mostrarAvisoBackup();
+}
+function mostrarAvisoBackup(){
+ const t=document.createElement('div');
+ t.textContent='✅ Backup automático semanal baixado (arquivo novo, seu backup anterior continua salvo).';
+ t.style.cssText='position:fixed;left:12px;right:12px;bottom:14px;z-index:50;background:#241611;border:1px solid #ec9ebd;color:#f5ece2;padding:12px 14px;border-radius:10px;font-size:12.8px;box-shadow:0 4px 14px rgba(0,0,0,.4)';
+ document.body.appendChild(t);
+ setTimeout(()=>t.remove(),7000);
+}
+function checkBackupAutomatico(){
+ if(!db.meta.proximoLembreteEm){
+  const d=new Date(); d.setDate(d.getDate()+7);
+  db.meta.proximoLembreteEm = d.toISOString().slice(0,10);
+  save();
+  renderBackupStatus();
+  return;
+ }
+ if(todayStr() >= db.meta.proximoLembreteEm){
+  exportarJSON(true);
+ } else {
+  renderBackupStatus();
+ }
+}
+async function solicitarPersistencia(){
+ try{
+  if(navigator.storage && navigator.storage.persist){
+   let concedido = await navigator.storage.persisted();
+   if(!concedido) concedido = await navigator.storage.persist();
+   db.meta.armazenamentoPersistente = concedido;
+  } else {
+   db.meta.armazenamentoPersistente = null;
+  }
+ }catch(e){ db.meta.armazenamentoPersistente = null; }
+ save();
+ renderBackupStatus();
+}
+function renderBackupStatus(){
+ const el = document.getElementById('backupStatusCard');
+ if(!el) return;
+ const meta = db.meta || {};
+ let linhaBackup;
+ if(meta.ultimoBackupEm){
+  const dias = diasEntre(meta.ultimoBackupEm, todayStr());
+  const cls = dias<=7?'good':(dias<=14?'warn':'danger-text');
+  linhaBackup = `Último backup: ${fmtData(meta.ultimoBackupEm)} <span class="${cls}">(há ${dias} dia${dias===1?'':'s'})</span>`;
+ } else {
+  linhaBackup = `<span class="warn">Nenhum backup feito ainda — exporte um agora mesmo.</span>`;
+ }
+ let persistTxt;
+ if(meta.armazenamentoPersistente===true) persistTxt = '<span class="good">ativado</span> — o navegador evita apagar seus dados sozinho por falta de espaço.';
+ else if(meta.armazenamentoPersistente===false) persistTxt = '<span class="warn">não concedido pelo navegador</span> — os dados continuam salvos normalmente, só ficam um pouco mais vulneráveis se o aparelho ficar com o armazenamento muito cheio.';
+ else persistTxt = '<span class="pill">não suportado neste navegador</span>';
+ el.innerHTML = `<h2>Status do backup</h2>
+ <p class="note">${linhaBackup}</p>
+ <p class="note">Armazenamento persistente: ${persistTxt}</p>
+ <p class="note">Um backup automático roda sozinho ao abrir o app, no máximo 1x por semana. Nada é sobrescrito: cada backup (manual ou automático) baixa um <b>arquivo novo</b>, com a data no nome, para a pasta de downloads.</p>`;
 }
 function importarJSON(ev){
  const file = ev.target.files[0]; if(!file) return;
@@ -739,6 +807,8 @@ vData.value = todayStr();
 dData.value = todayStr();
 formItens=[novaLinhaItem()];
 renderAll();
+solicitarPersistencia();
+checkBackupAutomatico();
 
 if('serviceWorker' in navigator){
  window.addEventListener('load', ()=>{

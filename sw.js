@@ -1,4 +1,4 @@
-const CACHE_NAME = 'doces-da-ge-v1';
+const CACHE_NAME = 'doces-da-ge-v2';
 const APP_SHELL = [
   './',
   './index.html',
